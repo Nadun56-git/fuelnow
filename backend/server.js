@@ -27,18 +27,24 @@ const { initializeSocketHandlers } = require('./socket/socketHandlers');
 
 // Initialize Express app
 const app = express();
+
+// Create HTTP server only for non-serverless runtimes
 const server = http.createServer(app);
 
-// Initialize Socket.io
-const io = new Server(server, {
-  cors: {
-    origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
-    methods: ['GET', 'POST', 'PATCH'],
-    credentials: true
-  }
-});
+// Socket.io is incompatible with Vercel serverless functions.
+// Enable it only when explicitly requested.
+const ENABLE_SOCKET_IO = process.env.ENABLE_SOCKET_IO === 'true' && process.env.VERCEL !== '1';
+const io = ENABLE_SOCKET_IO
+  ? new Server(server, {
+      cors: {
+        origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
+        methods: ['GET', 'POST', 'PATCH'],
+        credentials: true,
+      },
+    })
+  : null;
 
-// Make io accessible to routes
+// Make io accessible to routes (may be null)
 app.set('io', io);
 
 // Connect to MongoDB
@@ -85,16 +91,20 @@ app.use((req, res, next) => {
 // Global error handler
 app.use(errorHandler);
 
-// Initialize Socket.io handlers
-initializeSocketHandlers(io);
+// Initialize Socket.io handlers (only when enabled)
+if (io) {
+  initializeSocketHandlers(io);
+}
 
-// Start server
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`🚀 FuelNow server running on port ${PORT}`);
-  console.log(`📡 Socket.io initialized for real-time updates`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+// Start server only when running as a long-lived Node process (not in Vercel)
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  server.listen(PORT, () => {
+    console.log(`🚀 FuelNow server running on port ${PORT}`);
+    if (io) console.log(`📡 Socket.io initialized for real-time updates`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
